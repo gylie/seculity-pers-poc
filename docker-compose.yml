@@ -1,0 +1,63 @@
+# PERS feasibility PoC. Two profiles, one file:
+#   home    runs on a Mac on the camera's LAN:  COMPOSE_PROFILES=home docker compose up -d
+#   server  runs on the VPS (scripts/deploy.sh): COMPOSE_PROFILES=server docker compose up -d
+# The VPS cannot reach the camera over Wyze P2P (IOTC_ER_TIMEOUT), so the bridge runs
+# at home and scripts/tunnel.sh carries its RTSP stream to 127.0.0.1:8554 on the VPS.
+# Every port binds to 127.0.0.1: nothing here is reachable from the internet.
+name: muse
+
+services:
+  wyze-bridge:
+    profiles: [home]
+    image: mrlt8/wyze-bridge:2.10.3
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - QUALITY=${BRIDGE_QUALITY:-SD30}   # SD30 = 360p, HD120 = 1080p
+      - ENABLE_AUDIO=False
+      - ON_DEMAND=False    # keep the stream up so stability can be measured
+      # Only bridge the one test camera. Without a filter the bridge streams every
+      # camera on the account, so compose refuses to start if this is unset.
+      - FILTER_NAMES=${CAMERA_FILTER:?set CAMERA_FILTER in .env to the test camera's Wyze name}
+      # Host networking (below) puts the bridge on the home LAN, so bind everything to
+      # loopback; Colima forwards the VM's loopback ports to the Mac's 127.0.0.1.
+      - MTX_RTSPADDRESS=127.0.0.1:8554
+      - MTX_HLS=no
+      - MTX_WEBRTC=no
+      - MTX_RTMP=no
+      - MTX_SRT=no
+    # TUTK finds the camera by LAN broadcast, which does not cross Docker's NAT.
+    # Needs Colima in bridged mode (see README) so the VM itself is on the LAN.
+    network_mode: host
+    command: flask run --host=127.0.0.1 --port=5050   # macOS AirPlay already uses 5000
+    volumes:
+      - ./tokens:/tokens
+
+  pose:
+    profiles: [server]
+    build: ./pose
+    image: muse-pose
+    restart: unless-stopped
+    # Host networking so the service can read the SSH tunnel on the VPS's
+    # 127.0.0.1:8554; its own listeners bind to 127.0.0.1 in code.
+    network_mode: host
+    shm_size: 128m   # frame ring between frame_reader.py and the service (8 x 1080p)
+    environment:
+      - RTSP_URL=rtsp://127.0.0.1:8554/${CAMERA_NAME:?set CAMERA_NAME in .env}
+      - YOLO_EVERY=${YOLO_EVERY:-1}
+      - YOLO_IMGSZ=${YOLO_IMGSZ:-320}
+      - YOLO_CONF=${YOLO_CONF:-0.25}
+      - HOLD_S=${HOLD_S:-1.0}
+      - POSE_MODEL=${POSE_MODEL:-lite}
+      - MAX_QUEUE=${MAX_QUEUE:-15}
+      - DEBUG_VIEW=${DEBUG_VIEW:-0}   # dev only: MJPEG overlay on 127.0.0.1:8090
+      - VIEWER_PORT=${VIEWER_PORT:-8091}   # avatar viewer + WebSocket on 127.0.0.1
+      # Caregiver layer: posture events (never images) go to Meta's Model API (Muse Spark)
+      # for alert wording and summaries. Without META_API_KEY the rule-based alerts still work.
+      - META_API_KEY=${META_API_KEY:-}
+      - META_MODEL=${META_MODEL:-muse-spark-1.3}
+      - CARE_TZ=${CARE_TZ:-America/New_York}
+      - CARE_NAME=${CARE_NAME:-the resident}
+      - LONG_LIE_S=${LONG_LIE_S:-120}
+    volumes:
+      - ./data:/data

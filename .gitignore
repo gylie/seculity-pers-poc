@@ -1,0 +1,8 @@
+.env
+tokens/
+captures/
+__pycache__/
+*.pyc
+.venv/
+*.pt
+data/
