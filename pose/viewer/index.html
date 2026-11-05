@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Muse Garden</title>
+<style>
+  :root { --panel: rgba(255,255,255,.85); --ink: #1d3b2a; --live: #2fb35a; --idle: #b8b8b8; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe6f2; font-family: system-ui, -apple-system, sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 16px; top: 16px; background: var(--panel); color: var(--ink); border-radius: 12px;
+         padding: 10px 14px; font-size: 13px; line-height: 1.55; box-shadow: 0 2px 14px rgba(0,0,0,.12); min-width: 180px; }
+  #posture { font-size: 20px; font-weight: 650; margin: 2px 0; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--idle); margin-right: 6px; }
+  .dot.live { background: var(--live); }
+  #stats { color: #46604f; font-variant-numeric: tabular-nums; }
+  #brand { position: fixed; right: 16px; top: 16px; background: var(--panel); border-radius: 12px; padding: 8px 12px;
+           box-shadow: 0 2px 14px rgba(0,0,0,.12); line-height: 0; }
+  #brand img { height: 72px; width: auto; }
+  @media (max-width: 520px) { #brand img { height: 48px; } }
+  #care { position: fixed; left: 16px; bottom: 34px; width: min(360px, calc(100vw - 32px)); background: var(--panel);
+          color: var(--ink); border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.5;
+          box-shadow: 0 2px 14px rgba(0,0,0,.12); max-height: 46vh; overflow: auto; }
+  #care .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }
+  .tag { font-size: 11px; font-weight: 600; color: #0b5cad; background: #e3efff; border-radius: 999px; padding: 1px 8px; }
+  #summary { white-space: pre-wrap; }
+  #sumMeta { color: #6a7f71; font-size: 11px; margin-top: 4px; }
+  #care button, #alert button { margin-top: 8px; border: 0; border-radius: 8px; padding: 7px 12px; font: inherit;
+          font-weight: 600; cursor: pointer; background: #1d6b3c; color: #fff; }
+  #care button:disabled { opacity: .6; cursor: progress; }
+  #events { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid rgba(0,0,0,.08); color: #46604f; }
+  #events li { padding: 1px 0; } #events .warn { color: #b42318; font-weight: 600; }
+  #alert { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100vw - 32px));
+           background: #fff4f2; color: #5c1410; border: 2px solid #e5484d; border-radius: 12px; padding: 12px 14px;
+           font-size: 14px; line-height: 1.45; box-shadow: 0 6px 24px rgba(180,35,24,.25); z-index: 5; }
+  #alert .t { font-weight: 700; font-size: 16px; } #alert .when { font-weight: 400; color: #8a3a33; font-size: 13px; }
+  #alert button { background: #b42318; }
+  @media (max-width: 720px) { #alert { top: 120px; } }
+  #note { position: fixed; right: 16px; bottom: 12px; font-size: 12px; color: var(--ink); opacity: .75; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">
+  <div><span id="dot" class="dot"></span><span id="conn">Connecting</span></div>
+  <div id="posture">Waiting</div>
+  <div id="stats"></div>
+</div>
+<div id="alert" hidden>
+  <div class="t"><span id="alertTitle"></span> <span class="when" id="alertWhen"></span></div>
+  <div id="alertText"></div>
+  <button id="alertClose" type="button">Dismiss</button>
+</div>
+<div id="care">
+  <div class="head"><b>Caregiver update</b><span class="tag">Meta Muse Spark</span></div>
+  <div id="summary">Ask Meta's Muse Spark for a plain-language update on recent activity.</div>
+  <div id="sumMeta"></div>
+  <button id="sumBtn" type="button">Summarize recent activity</button>
+  <ul id="events"></ul>
+</div>
+<div id="brand"><img src="/seculity-logo.png" alt="Seculity"></div>
+<div id="note">PoC viewer: receives pose numbers only, never video</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- scene: a small garden ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#cfe6f2');
+scene.fog = new THREE.Fog('#cfe6f2', 14, 30);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 2.6, 7.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.8, 0);
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.update();
+
+scene.add(new THREE.HemisphereLight('#e8f4ff', '#5b7a3a', 1.6));
+const sun = new THREE.DirectionalLight('#fff4dc', 2.2);
+sun.position.set(4, 8, 5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 });
+scene.add(sun);
+
+const mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 64), mat('#7fb55a'));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const path = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 14), mat('#d9c9a3'));
+path.rotation.x = -Math.PI / 2; path.position.set(0, 0.005, 1);
+path.receiveShadow = true;
+scene.add(path);
+
+function tree(x, z, s = 1) {
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.16 * s, 1.2 * s), mat('#7a5233'));
+  trunk.position.y = 0.6 * s;
+  const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9 * s, 1), mat('#3f8a3c'));
+  crown.position.y = 1.7 * s;
+  for (const m of [trunk, crown]) { m.castShadow = true; g.add(m); }
+  g.position.set(x, 0, z);
+  scene.add(g);
+}
+[[-5, -4, 1.3], [5.5, -3.5, 1.1], [-6.5, 1, 1], [6.5, 1.5, 1.2], [-3, -7, 1.4], [3, -7.5, 1.2]].forEach(a => tree(...a));
+
+const hedge = new THREE.Mesh(new THREE.BoxGeometry(12, 0.8, 0.6), mat('#4d8f43'));
+hedge.position.set(0, 0.4, -5); hedge.castShadow = true;
+scene.add(hedge);
+
+const flowerColors = ['#f27da0', '#ffd23f', '#ffffff', '#b07cf2', '#ff8c42'];
+const flowerGeo = new THREE.SphereGeometry(0.06, 8, 6);
+for (let i = 0; i < 160; i++) {
+  const f = new THREE.Mesh(flowerGeo, mat(flowerColors[i % flowerColors.length]));
+  let x, z;
+  do { x = (Math.random() - 0.5) * 16; z = -4.4 + Math.random() * 9; } while (Math.abs(x) < 4.6 && z > -4);
+  f.position.set(x, 0.12, z);
+  scene.add(f);
+}
+
+// Props that appear under the avatar: a stump to sit on, a blanket to lie on.
+const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1, 20), mat('#8a6a46'));
+stump.castShadow = true; stump.receiveShadow = true; stump.visible = false;
+scene.add(stump);
+const blanket = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 2.1), mat('#e9b8c8'));
+blanket.rotation.x = -Math.PI / 2; blanket.visible = false; blanket.receiveShadow = true;
+scene.add(blanket);
+
+// ---------- avatar: one hardcoded figure built from joints ----------
+const NAMES = ['nose', 'l_ear', 'r_ear', 'l_shoulder', 'r_shoulder', 'l_elbow', 'r_elbow', 'l_wrist', 'r_wrist',
+               'l_hip', 'r_hip', 'l_knee', 'r_knee', 'l_ankle', 'r_ankle', 'l_foot', 'r_foot'];
+const BONES = [['l_shoulder', 'l_elbow'], ['l_elbow', 'l_wrist'], ['r_shoulder', 'r_elbow'], ['r_elbow', 'r_wrist'],
+               ['l_hip', 'l_knee'], ['l_knee', 'l_ankle'], ['r_hip', 'r_knee'], ['r_knee', 'r_ankle'],
+               ['l_ankle', 'l_foot'], ['r_ankle', 'r_foot'], ['l_shoulder', 'r_shoulder'], ['l_hip', 'r_hip']];
+const skin = new THREE.MeshStandardMaterial({ color: '#ffd2a8', roughness: 0.7, transparent: true });
+const cloth = new THREE.MeshStandardMaterial({ color: '#3d7dd8', roughness: 0.8, transparent: true });
+const pants = new THREE.MeshStandardMaterial({ color: '#2f3e5c', roughness: 0.8, transparent: true });
+
+const avatar = new THREE.Group();
+scene.add(avatar);
+const cyl = new THREE.CylinderGeometry(1, 1, 1, 14);
+const ball = new THREE.SphereGeometry(1, 16, 12);
+function part(geo, m, r) { const o = new THREE.Mesh(geo, m); o.castShadow = true; o.userData.r = r; avatar.add(o); return o; }
+const boneMeshes = BONES.map(([a]) => part(cyl, /hip|knee|ankle/.test(a) ? pants : cloth, /hip|knee/.test(a) ? 0.07 : 0.055));
+const jointMeshes = Object.fromEntries(NAMES.filter(n => !/ear|nose/.test(n))
+  .map(n => [n, part(ball, /wrist|foot/.test(n) ? skin : /hip|knee|ankle/.test(n) ? pants : cloth, /wrist/.test(n) ? 0.06 : 0.07)]));
+const torso = part(cyl, cloth, 0.16);
+const neck = part(cyl, skin, 0.05);
+const head = part(ball, skin, 0.13);
+
+const UP = new THREE.Vector3(0, 1, 0);
+function placeBone(mesh, a, b) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = Math.max(dir.length(), 1e-3);
+  mesh.position.copy(a).addScaledVector(dir, 0.5);
+  mesh.quaternion.setFromUnitVectors(UP, dir.divideScalar(len));
+  mesh.scale.set(mesh.userData.r, len, mesh.userData.r);
+}
+
+// A neutral standing pose until the first packet arrives (meters, hip centered, y up).
+const cur = {}, target = {};
+const REST = { nose: [0, .62, .08], l_ear: [.07, .6, 0], r_ear: [-.07, .6, 0], l_shoulder: [.18, .5, 0], r_shoulder: [-.18, .5, 0],
+  l_elbow: [.22, .22, 0], r_elbow: [-.22, .22, 0], l_wrist: [.24, -.04, .02], r_wrist: [-.24, -.04, .02], l_hip: [.1, 0, 0], r_hip: [-.1, 0, 0],
+  l_knee: [.1, -.43, 0], r_knee: [-.1, -.43, 0], l_ankle: [.1, -.85, 0], r_ankle: [-.1, -.85, 0], l_foot: [.1, -.9, .12], r_foot: [-.1, -.9, .12] };
+for (const n of NAMES) { cur[n] = new THREE.Vector3(...REST[n]); target[n] = cur[n].clone(); }
+const rootCur = new THREE.Vector3(0, 0.95, 0), rootTarget = rootCur.clone();
+
+// ---------- packets to avatar targets ----------
+const qLie = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
+  .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+let posture = null, present = false, lastSeen = 0;
+
+function applyPacket(p) {
+  present = p.present;
+  posture = p.posture;
+  if (!p.present) return;
+  lastSeen = performance.now();
+  // MediaPipe world: x right, y down, z toward the camera is negative. Three.js: y up.
+  const raw = {};
+  for (const n of NAMES) { const j = p.joints[n]; raw[n] = new THREE.Vector3(j[0], -j[1], -j[2]); }
+  const hip = raw.l_hip.clone().add(raw.r_hip).multiplyScalar(0.5);
+  const sh = raw.l_shoulder.clone().add(raw.r_shoulder).multiplyScalar(0.5);
+  // Stand the torso upright (removes the camera's downward tilt), keep which way the person faces.
+  const q = new THREE.Quaternion().setFromUnitVectors(sh.clone().sub(hip).normalize(), UP);
+  if (posture === 'lying') q.premultiply(qLie);
+  let minY = Infinity;
+  for (const n of NAMES) {
+    target[n].copy(raw[n]).sub(hip).applyQuaternion(q);
+    minY = Math.min(minY, target[n].y);
+  }
+  // Feet (or back, when lying) rest on the grass: the hips sit as high as the body allows.
+  const x = THREE.MathUtils.clamp((p.position[0] - 0.5) * 7, -3.5, 3.5);
+  const z = THREE.MathUtils.clamp((p.position[1] - 0.65) * 6, -3, 2.5);
+  rootTarget.set(x, -minY + (posture === 'lying' ? 0.1 : 0.03), z);
+}
+
+// ---------- WebSocket ----------
+const conn = document.getElementById('conn'), dot = document.getElementById('dot');
+const postureEl = document.getElementById('posture'), statsEl = document.getElementById('stats');
+let packets = 0, latSum = 0, latN = 0;
+function connect() {
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => { conn.textContent = 'Live'; dot.classList.add('live'); };
+  ws.onclose = () => { conn.textContent = 'Reconnecting'; dot.classList.remove('live'); setTimeout(connect, 1000); };
+  ws.onmessage = e => {
+    const p = JSON.parse(e.data);
+    if (p.type === 'event') return addEvent(p);
+    if (p.type === 'alert') return showAlert(p);
+    packets++;
+    latSum += Date.now() / 1000 - p.timestamp; latN++;
+    applyPacket(p);
+  };
+}
+connect();
+
+// ---------- caregiver panel (events, alerts, Muse Spark summaries) ----------
+const EVENT_LABEL = { standing: 'Standing', sitting: 'Sat down', lying: 'Lying down',
+  'left view': 'Out of view', 'entered view': 'Back in view' };
+const eventsEl = document.getElementById('events');
+function addEvent(ev) {
+  if (!EVENT_LABEL[ev.kind] && ev.kind !== 'alert') return;
+  const li = document.createElement('li');
+  if (ev.kind === 'alert') { li.className = 'warn'; li.textContent = `${ev.time}  ${ev.detail}`; }
+  else li.textContent = `${ev.time}  ${EVENT_LABEL[ev.kind]}`;
+  eventsEl.prepend(li);
+  while (eventsEl.children.length > 6) eventsEl.lastChild.remove();
+}
+const alertEl = document.getElementById('alert');
+let alertT = null;
+function showAlert(a) {
+  if (a.text === null && alertT === a.t && !alertEl.hidden) return;
+  alertT = a.t;
+  document.getElementById('alertTitle').textContent = a.title;
+  document.getElementById('alertWhen').textContent = `at ${a.time}`;
+  document.getElementById('alertText').textContent = a.text || (a.error ? a.fact : `${a.fact} Muse Spark is writing the message...`);
+  alertEl.hidden = false;
+}
+document.getElementById('alertClose').onclick = () => { alertEl.hidden = true; };
+const sumBtn = document.getElementById('sumBtn'), sumEl = document.getElementById('summary'), sumMeta = document.getElementById('sumMeta');
+sumBtn.onclick = async () => {
+  sumBtn.disabled = true; sumEl.textContent = 'Asking Muse Spark...'; sumMeta.textContent = '';
+  try {
+    const r = await (await fetch('/summary?hours=12')).json();
+    sumEl.textContent = r.text || r.error;
+    if (r.text) sumMeta.textContent = `${r.model.replace(/-/g, ' ')} · ${r.from} to ${r.to}`;
+  } catch (err) { sumEl.textContent = 'Could not reach the service.'; }
+  sumBtn.disabled = false;
+};
+
+setInterval(() => {
+  statsEl.textContent = `${(packets / 2).toFixed(1)} packets/s · ${latN ? Math.round(latSum / latN * 1000) : 'n/a'} ms from VPS`;
+  packets = 0; latSum = 0; latN = 0;
+}, 2000);
+
+// ---------- animation ----------
+const LABEL = { standing: 'Standing', sitting: 'Sitting', lying: 'Lying down' };
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const k = 1 - Math.exp(-dt * 12), kRoot = 1 - Math.exp(-dt * 5);
+  for (const n of NAMES) cur[n].lerp(target[n], k);
+  rootCur.lerp(rootTarget, kRoot);
+  avatar.position.copy(rootCur);
+
+  BONES.forEach(([a, b], i) => placeBone(boneMeshes[i], cur[a], cur[b]));
+  for (const [n, m] of Object.entries(jointMeshes)) { m.position.copy(cur[n]); m.scale.setScalar(m.userData.r); }
+  const hip = cur.l_hip.clone().add(cur.r_hip).multiplyScalar(0.5);
+  const sh = cur.l_shoulder.clone().add(cur.r_shoulder).multiplyScalar(0.5);
+  placeBone(torso, hip, sh);
+  const ears = cur.l_ear.clone().add(cur.r_ear).multiplyScalar(0.5);
+  const headPos = ears.lerp(cur.nose, 0.3);
+  placeBone(neck, sh, headPos);
+  head.position.copy(headPos); head.scale.setScalar(head.userData.r);
+
+  const away = performance.now() - lastSeen > 2000;
+  const opacity = away ? 0.35 : 1;
+  for (const m of [skin, cloth, pants]) m.opacity += (opacity - m.opacity) * k;
+
+  // Stump under the hips when sitting, blanket under the body when lying.
+  const hipWorld = hip.clone().add(rootCur);
+  stump.visible = posture === 'sitting' && !away;
+  if (stump.visible) { const hgt = Math.max(hipWorld.y - 0.08, 0.15); stump.scale.set(1, hgt, 1); stump.position.set(hipWorld.x, hgt / 2, hipWorld.z - 0.05); }
+  blanket.visible = posture === 'lying' && !away;
+  if (blanket.visible) { blanket.position.set(hipWorld.x, 0.01, hipWorld.z); blanket.rotation.z = Math.PI / 2; }
+
+  postureEl.textContent = away ? 'No one in view' : (LABEL[posture] || 'Detecting');
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
