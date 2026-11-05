@@ -1,0 +1,7 @@
+# torch/torchvision are installed first from the CPU-only index (see Dockerfile).
+ultralytics==8.4.202
+lap==0.5.14
+mediapipe==1.2.2
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
+websockets==17.3
